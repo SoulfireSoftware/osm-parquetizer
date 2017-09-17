@@ -1,6 +1,11 @@
 package io.github.adrianulbona.osm.parquet;
 
+import com.amazonaws.services.s3.AmazonS3;
+import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import crosby.binary.osmosis.OsmosisReader;
+import org.apache.commons.io.FilenameUtils;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
 import org.kohsuke.args4j.Argument;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
@@ -10,10 +15,13 @@ import org.openstreetmap.osmosis.core.domain.v0_6.EntityType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.nio.file.Path;
+import java.io.InputStream;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static java.nio.file.Files.newInputStream;
@@ -27,16 +35,21 @@ import static org.openstreetmap.osmosis.core.domain.v0_6.EntityType.Relation;
  */
 public class App {
 
-    public static void main(String[] args) throws IOException {
+    private static final Logger log = LoggerFactory.getLogger(App.class);
+
+    public static void main(String[] args) throws Exception {
         final MultiEntitySinkConfig config = new MultiEntitySinkConfig();
         final CmdLineParser cmdLineParser = new CmdLineParser(config);
         try {
             cmdLineParser.parseArgument(args);
-            final OsmosisReader reader = new OsmosisReader(newInputStream(config.getSource()));
-            final MultiEntitySink sink = new MultiEntitySink(config);
-            sink.addObserver(new MultiEntitySinkObserver());
-            reader.setSink(sink);
-            reader.run();
+
+            try (InputStream sourceInput = loadSource(config.sourceFile)) {
+                final OsmosisReader reader = new OsmosisReader(sourceInput);
+                final MultiEntitySink sink = new MultiEntitySink(config);
+                sink.addObserver(new MultiEntitySinkObserver());
+                reader.setSink(sink);
+                reader.run();
+            }
         } catch (CmdLineException e) {
             System.out.println(e.getMessage());
             System.out.print("Usage: java -jar osm-parquetizer.jar");
@@ -45,14 +58,34 @@ public class App {
         }
     }
 
+
+    private static InputStream loadSource(URI sourceFile) throws Exception {
+        if (Objects.equals(sourceFile.getScheme(), "s3")) {
+            String bucketName = sourceFile.getHost();
+            String sourcePath = sourceFile.getPath().replaceAll("^/", "");
+            log.info("Loading source file (S3): bucket=" + bucketName + ", path=" + sourcePath);
+
+            AmazonS3 s3 = AmazonS3ClientBuilder.standard().build();
+            return s3.getObject(bucketName, sourcePath).getObjectContent();
+        } else if (sourceFile.getScheme() != null) {
+            log.info("Loading source file (Hadoop): " + sourceFile);
+
+            Path sourceFilePath = new Path(sourceFile.toString());
+            return sourceFilePath.getFileSystem(new Configuration()).open(sourceFilePath);
+        } else {
+            log.info("Loading source file (Local): " + sourceFile);
+
+            return newInputStream(Paths.get(sourceFile.toString()));
+        }
+    }
+
     private static class MultiEntitySinkConfig implements MultiEntitySink.Config {
 
-        @Argument(index = 0, metaVar = "pbf-path", usage = "the OSM PBF file to be parquetized", required = true)
-        private Path source;
+        @Argument(index = 0, metaVar = "pbf-path", usage = "the OSM PBF file path or URI to be parquetized", required = true)
+        private URI sourceFile;
 
-        @Argument(index = 1, metaVar = "output-path", usage = "the directory where to store the Parquet files",
-                required = false)
-        private Path destinationFolder;
+        @Argument(index = 1, metaVar = "output-path", usage = "the directory path or URI where to store the Parquet files")
+        private URI destinationFolder;
 
         @Option(name = "--exclude-metadata", usage = "if present the metadata will not be parquetized")
         private boolean excludeMetadata = false;
@@ -72,13 +105,13 @@ public class App {
         }
 
         @Override
-        public Path getSource() {
-            return this.source;
+        public URI getSourceFile() {
+            return sourceFile;
         }
 
         @Override
-        public Path getDestinationFolder() {
-            return this.destinationFolder != null ? this.destinationFolder : this.source.toAbsolutePath().getParent();
+        public URI getDestinationFolder() {
+            return destinationFolder != null ? destinationFolder : getParentDirectory(sourceFile);
         }
 
         @Override
@@ -95,12 +128,22 @@ public class App {
             }
             return unmodifiableList(entityTypes);
         }
+
+        private static URI getParentDirectory(URI uri) {
+            try {
+                return new URI(uri.getScheme(), uri.getUserInfo(), uri.getHost(), uri.getPort(),
+                        FilenameUtils.getFullPath(uri.getPath()), uri.getQuery(), uri.getFragment());
+            } catch (URISyntaxException e) {
+                throw new IllegalArgumentException("Invalid source URI", e);
+            }
+        }
+
     }
 
 
     private static class MultiEntitySinkObserver implements MultiEntitySink.Observer {
 
-        private static final Logger LOGGER = LoggerFactory.getLogger(MultiEntitySinkObserver.class);
+        private final Logger log = LoggerFactory.getLogger(getClass());
 
         private AtomicLong totalEntitiesCount;
 
@@ -113,14 +156,14 @@ public class App {
         public void processed(Entity entity) {
             final long count = totalEntitiesCount.incrementAndGet();
             if (count % 1000000 == 0) {
-                LOGGER.info("Entities processed: " + count);
+                log.info("Entities processed: " + count);
 
             }
         }
 
         @Override
         public void ended() {
-            LOGGER.info("Total entities processed: " + totalEntitiesCount.get());
+            log.info("Total entities processed: " + totalEntitiesCount.get());
         }
     }
 }

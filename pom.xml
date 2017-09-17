@@ -4,13 +4,13 @@
     <groupId>io.github.adrianulbona</groupId>
     <artifactId>osm-parquetizer</artifactId>
     <packaging>jar</packaging>
-    <version>1.0.1-SNAPSHOT</version>
+    <version>1.1.0</version>
     <name>OSM Parquetizer</name>
     <url>http://maven.apache.org</url>
     <properties>
-        <osmosis.version>0.44.1</osmosis.version>
-        <parquet.version>1.8.1</parquet.version>
-        <hadoop.version>2.7.2</hadoop.version>
+        <osmosis.version>0.45</osmosis.version>
+        <parquet.version>1.9.0</parquet.version>
+        <hadoop.version>2.7.3</hadoop.version>
         <encoding>UTF-8</encoding>
     </properties>
     <dependencies>
@@ -30,19 +30,15 @@
             <version>${hadoop.version}</version>
             <exclusions>
                 <exclusion>
-                    <groupId>log4j</groupId>
-                    <artifactId>log4j</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>org.slf4j</groupId>
-                    <artifactId>slf4j-log4j12</artifactId>
+                    <groupId>commons-beanutils</groupId>
+                    <artifactId>commons-beanutils</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
         <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-log4j12</artifactId>
-            <version>1.7.19</version>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-s3</artifactId>
+            <version>1.11.196</version>
         </dependency>
         <dependency>
             <groupId>args4j</groupId>
@@ -80,6 +76,13 @@
                             <mainClass>io.github.adrianulbona.osm.parquet.App</mainClass>
                         </transformer>
                     </transformers>
+                    <relocations>
+                        <!-- Relocate protobuf because of classpath conflict when running in EMR -->
+                        <relocation>
+                            <pattern>com.google.protobuf</pattern>
+                            <shadedPattern>shaded.com.google.protobuf</shadedPattern>
+                        </relocation>
+                    </relocations>
                 </configuration>
                 <executions>
                     <execution>

@@ -7,7 +7,7 @@ import org.openstreetmap.osmosis.core.lifecycle.Completable;
 import org.openstreetmap.osmosis.core.lifecycle.Releasable;
 import org.openstreetmap.osmosis.core.task.v0_6.Sink;
 
-import java.nio.file.Path;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +26,7 @@ public class MultiEntitySink implements Sink {
 
     public MultiEntitySink(Config config) {
         final List<EntityType> entityTypes = config.entitiesToBeParquetized();
-        this.converters = entityTypes.stream().map(type -> new ParquetSink<>(config.getSource(),
+        this.converters = entityTypes.stream().map(type -> new ParquetSink<>(config.getSourceFile(),
                 config.getDestinationFolder(), config.getExcludeMetadata(), type)).collect(toList());
         this.observers = new ArrayList<>();
     }
@@ -74,9 +74,9 @@ public class MultiEntitySink implements Sink {
 
     public interface Config {
 
-        Path getSource();
+        URI getSourceFile();
 
-        Path getDestinationFolder();
+        URI getDestinationFolder();
 
         boolean getExcludeMetadata();
 
